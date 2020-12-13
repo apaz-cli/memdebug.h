@@ -1,3 +1,55 @@
+/***********/
+/* Mutexes */
+/***********/
+#ifndef __INCLUDED_MUTEX
+#define __INCLUDED_MUTEX
+
+// All mutex functions return 0 on success
+
+// Check if compiling for Windows
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+
+// #define mutex_t HANDLE
+// int mutex_init(mutex_t* mutex) { return ((*mutex = CreateMutex(0, FALSE, 0)) == 0); }
+// int mutex_lock(mutex_t* mutex) { return (WaitForSingleObject(*mutex, INFINITE) == WAIT_FAILED ? 1 : 0); }
+// int mutex_unlock(mutex_t* mutex) { return (ReleaseMutex(*mutex) == 0); }
+// int mutex_destroy(mutex_t* mutex) { return (CloseHandle(*mutex) == 0); }
+
+#define mutex_t PSRWLOCK
+#define MUTEX_INITIALIZER SRWLOCK_INIT
+int mutex_init(mutex_t* mutex) {
+    InitializeSRWLock(*mutex);
+    return 0;
+}
+int mutex_lock(mutex_t* mutex) {
+    AcquireSRWLockExclusive(*mutex);
+    return 0;
+}
+int mutex_unlock(mutex_t* mutex) {
+    ReleaseSRWLockExclusive(*mutex);
+    return 0;
+}
+int mutex_destroy(mutex_t* mutex) { return 0; }
+
+// On other platforms use <pthread.h>
+#else
+#include <pthread.h>
+
+#define mutex_t pthread_mutex_t
+#define MUTEX_INITIALIZER PTHREAD_MUTEX_INITIALIZER
+int mutex_init(mutex_t* mutex) { return pthread_mutex_init(mutex, NULL); }
+int mutex_lock(mutex_t* mutex) { return pthread_mutex_lock(mutex); }
+int mutex_unlock(mutex_t* mutex) { return pthread_mutex_unlock(mutex); }
+int mutex_destroy(mutex_t* mutex) { return pthread_mutex_destroy(mutex); }
+#endif
+
+#endif  // End mutex include guard
+
+/************/
+/* MEMDEBUG */
+/************/
 #ifndef __INCLUDED_MEMDEBUG
 #define __INCLUDED_MEMDEBUG
 
@@ -5,8 +57,8 @@
 #define MEMDEBUG 1
 #endif
 
-// Used to control debug error messages for every allocation.
-// Still wraps malloc() and tracks allocations for print_heap() if this is off/
+// PRINT_MEMALLOCS is used to control debug error messages for every allocation.
+// Still wraps malloc() and tracks allocations for print_heap() if this is off.
 #if MEMDEBUG
 #ifndef PRINT_MEMALLOCS
 #define PRINT_MEMALLOCS 1
@@ -18,9 +70,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/***********************/
-/* Allocation Tracking */
-/***********************/
+/****************************************/
+/* Global Allocation Tracking Variables */
+/****************************************/
 
 struct MemAlloc {
     void* ptr;
@@ -33,6 +85,11 @@ typedef struct MemAlloc MemAlloc;
 size_t num_allocs = 0;
 size_t allocs_cap = 0;
 MemAlloc* allocs;
+
+// Mutex to guard the above allocation structure.
+mutex_t alloc_mutex = MUTEX_INITIALIZER;
+#define MEMDEBUG_LOCK_MUTEX mutex_lock(&alloc_mutex);
+#define MEMDEBUG_UNLOCK_MUTEX mutex_unlock(&alloc_mutex);
 
 #ifndef MEMPANIC_EXIT_STATUS
 #define MEMPANIC_EXIT_STATUS 10
@@ -51,7 +108,7 @@ extern void print_heap();
 /* Not Externally visible */
 /**************************/
 static inline void mempanic(void* badptr, char* message, size_t line, char* file);
-static inline void OOM(size_t line, char* file);
+static inline void OOM(size_t line, char* file, size_t num_bytes);
 
 static inline void
 mempanic(void* badptr, char* message, size_t line, char* file) {
@@ -61,8 +118,8 @@ mempanic(void* badptr, char* message, size_t line, char* file) {
 }
 
 static inline void
-OOM(size_t line, char* file) {
-    printf("Out of memory on line %lu in file: %s.\nDumping heap:\n", line, file);
+OOM(size_t line, char* file, size_t num_bytes) {
+    printf("Out of memory on line %lu in file: %s.\nCould not allocate %lu bytes.\nDumping heap:\n", line, file, num_bytes);
     print_heap();
     exit(OOM_EXIT_STATUS);
 }
@@ -110,7 +167,7 @@ alloc_push(MemAlloc alloc) {
             newptr = (MemAlloc*)realloc(allocs, sizeof(MemAlloc) * new_allocs_cap);
             if (!newptr) {
                 printf("Failed to allocate more space to track allocations.\n");
-                OOM(__LINE__, __FILE__);
+                OOM(__LINE__, __FILE__, sizeof(MemAlloc) * new_allocs_cap);
             }
             allocs_cap = new_allocs_cap;
             allocs = newptr;
@@ -145,7 +202,7 @@ extern void*
 memdebug_malloc(size_t n, size_t line, char* file) {
     // Call malloc()
     void* ptr = malloc(n);
-    if (!ptr) OOM(line, file);
+    if (!ptr) OOM(line, file, n);
 
 #if PRINT_MEMALLOCS
     // Print message
@@ -159,12 +216,17 @@ memdebug_malloc(size_t n, size_t line, char* file) {
     newalloc.size = n;
     newalloc.line = line;
     newalloc.file = file;
+
+    MEMDEBUG_LOCK_MUTEX;
     alloc_push(newalloc);
+    MEMDEBUG_UNLOCK_MUTEX;
     return ptr;
 }
 
 extern void*
 memdebug_realloc(void* ptr, size_t n, size_t line, char* file) {
+    MEMDEBUG_LOCK_MUTEX;
+
     // Check to make sure the allocation exists, and keep track of the location
     size_t alloc_index = alloc_find_index(ptr);
     if (ptr != NULL && alloc_index == MEM_FAIL_TO_FIND) {
@@ -173,7 +235,7 @@ memdebug_realloc(void* ptr, size_t n, size_t line, char* file) {
 
     // Call realloc()
     void* newptr = realloc(ptr, n);
-    if (!newptr) OOM(line, file);
+    if (!newptr) OOM(line, file, n);
 
 #if PRINT_MEMALLOCS
     // Print message
@@ -188,11 +250,16 @@ memdebug_realloc(void* ptr, size_t n, size_t line, char* file) {
     newalloc.line = line;
     newalloc.file = file;
     alloc_update(alloc_index, newalloc);
+
+    MEMDEBUG_UNLOCK_MUTEX;
+
     return newptr;
 }
 
 extern void
 memdebug_free(void* ptr, size_t line, char* file) {
+    MEMDEBUG_LOCK_MUTEX;
+
     // Check to make sure the allocation exists, and keep track of the location
     size_t alloc_index = alloc_find_index(ptr);
     if (ptr != NULL && alloc_index == MEM_FAIL_TO_FIND) {
@@ -210,13 +277,17 @@ memdebug_free(void* ptr, size_t line, char* file) {
 
     // Remove from the list of allocations
     alloc_remove(alloc_index);
+    
+    MEMDEBUG_UNLOCK_MUTEX;
 }
+
+// Wrap malloc(), realloc(), free() with the new functionality
 
 #define malloc(n) memdebug_malloc(n, __LINE__, __FILE__)
 #define realloc(ptr, n) memdebug_realloc(ptr, n, __LINE__, __FILE__)
 #define free(ptr) memdebug_free(ptr, __LINE__, __FILE__)
 
-#else  // MEMDEBUG flag
+#else  // MEMDEBUG flag is disabled
 /*************************************************************************************/
 /* Define externally visible functions to do nothing when debugging flag is disabled */
 /*************************************************************************************/
