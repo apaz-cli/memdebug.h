@@ -6,35 +6,19 @@
 
 // All mutex functions return 0 on success
 
-// Check if compiling for Windows
 #ifdef _WIN32
-#include <process.h>
-#include <windows.h>
+// Use windows.h if compiling for Windows
+#include <Windows.h>
 
-// #define mutex_t HANDLE
-// int mutex_init(mutex_t* mutex) { return ((*mutex = CreateMutex(0, FALSE, 0)) == 0); }
-// int mutex_lock(mutex_t* mutex) { return (WaitForSingleObject(*mutex, INFINITE) == WAIT_FAILED ? 1 : 0); }
-// int mutex_unlock(mutex_t* mutex) { return (ReleaseMutex(*mutex) == 0); }
-// int mutex_destroy(mutex_t* mutex) { return (CloseHandle(*mutex) == 0); }
-
-#define mutex_t PSRWLOCK
+#define mutex_t SRWLOCK
 #define MUTEX_INITIALIZER SRWLOCK_INIT
-int mutex_init(mutex_t* mutex) {
-    InitializeSRWLock(*mutex);
-    return 0;
-}
-int mutex_lock(mutex_t* mutex) {
-    AcquireSRWLockExclusive(*mutex);
-    return 0;
-}
-int mutex_unlock(mutex_t* mutex) {
-    ReleaseSRWLockExclusive(*mutex);
-    return 0;
-}
+int mutex_init(mutex_t* mutex) { InitializeSRWLock(mutex); return 0; }
+int mutex_lock(mutex_t* mutex) { AcquireSRWLockExclusive(mutex); return 0; }
+int mutex_unlock(mutex_t* mutex) { ReleaseSRWLockExclusive(mutex); return 0; }
 int mutex_destroy(mutex_t* mutex) { return 0; }
 
-// On other platforms use <pthread.h>
 #else
+// On other platforms use <pthread.h>
 #include <pthread.h>
 
 #define mutex_t pthread_mutex_t
