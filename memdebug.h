@@ -96,14 +96,14 @@ static inline void OOM(size_t line, char* file, size_t num_bytes);
 
 static inline void
 mempanic(void* badptr, char* message, size_t line, char* file) {
-    printf("MEMORY PANIC: %s\nPointer: %p\nOn line: %lu\nIn file: %s\nAborted.\n", message, badptr, line, file);
+    printf("MEMORY PANIC: %s\nPointer: %p\nOn line: %zu\nIn file: %s\nAborted.\n", message, badptr, line, file);
     fflush(stdout);
     exit(MEMPANIC_EXIT_STATUS);
 }
 
 static inline void
 OOM(size_t line, char* file, size_t num_bytes) {
-    printf("Out of memory on line %lu in file: %s.\nCould not allocate %lu bytes.\nDumping heap:\n", line, file, num_bytes);
+    printf("Out of memory on line %zu in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, file, num_bytes);
     print_heap();
     exit(OOM_EXIT_STATUS);
 }
@@ -115,11 +115,11 @@ print_heap() {
 
     printf("\n*************\n* HEAP DUMP *\n*************\n");
     for (i = 0; i < num_allocs; i++) {
-        printf("Heap ptr: %p of size: %lu Allocated in file: %s On line: %lu\n",
+        printf("Heap ptr: %p of size: %zu Allocated in file: %s On line: %zu\n",
                allocs[i].ptr, allocs[i].size, allocs[i].file, allocs[i].line);
         total_allocated += allocs[i].size;
     }
-    printf("\nTotal Heap size: %lu, number of items: %lu\n\n\n", total_allocated, num_allocs);
+    printf("\nTotal Heap size: %zu, number of items: %zu\n\n\n", total_allocated, num_allocs);
     fflush(stdout);
 }
 
@@ -190,7 +190,7 @@ memdebug_malloc(size_t n, size_t line, char* file) {
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("malloc(%lu) -> %p in %s, line %lu.\n", n, ptr, file, line);
+    printf("malloc(%zu) -> %p in %s, line %zu.\n", n, ptr, file, line);
     fflush(stdout);
 #endif
 
@@ -223,7 +223,7 @@ memdebug_realloc(void* ptr, size_t n, size_t line, char* file) {
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("realloc(%p, %lu) -> %p in %s, line %lu.\n", ptr, n, newptr, file, line);
+    printf("realloc(%p, %zu) -> %p in %s, line %zu.\n", ptr, n, newptr, file, line);
     fflush(stdout);
 #endif
 
@@ -255,7 +255,7 @@ memdebug_free(void* ptr, size_t line, char* file) {
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("free(%p) in %s, line %lu.\n", ptr, file, line);
+    printf("free(%p) in %s, line %zu.\n", ptr, file, line);
     fflush(stdout);
 #endif
 
