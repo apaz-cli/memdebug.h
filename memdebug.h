@@ -137,7 +137,6 @@ alloc_find_index(void* ptr) {
 
 static inline void
 alloc_push(MemAlloc alloc) {
-    size_t new_allocs_cap;
     MemAlloc* newptr;
 
     // Allocate more memory to store the information about the allocations if necessary
@@ -147,7 +146,7 @@ alloc_push(MemAlloc alloc) {
             allocs_cap = MEMDEBUG_START_NUM_ALLOCS;
             allocs = (MemAlloc*)malloc(sizeof(MemAlloc) * allocs_cap);
         } else {
-            new_allocs_cap = allocs_cap * 1.4;
+            size_t new_allocs_cap = allocs_cap * 1.4;
             newptr = (MemAlloc*)realloc(allocs, sizeof(MemAlloc) * new_allocs_cap);
             if (!newptr) {
                 printf("Failed to allocate more space to track allocations.\n");
