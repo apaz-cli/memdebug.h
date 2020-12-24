@@ -12,9 +12,18 @@
 
 #define mutex_t SRWLOCK
 #define MUTEX_INITIALIZER SRWLOCK_INIT
-int mutex_init(mutex_t* mutex) { InitializeSRWLock(mutex); return 0; }
-int mutex_lock(mutex_t* mutex) { AcquireSRWLockExclusive(mutex); return 0; }
-int mutex_unlock(mutex_t* mutex) { ReleaseSRWLockExclusive(mutex); return 0; }
+int mutex_init(mutex_t* mutex) {
+    InitializeSRWLock(mutex);
+    return 0;
+}
+int mutex_lock(mutex_t* mutex) {
+    AcquireSRWLockExclusive(mutex);
+    return 0;
+}
+int mutex_unlock(mutex_t* mutex) {
+    ReleaseSRWLockExclusive(mutex);
+    return 0;
+}
 int mutex_destroy(mutex_t* mutex) { return 0; }
 
 #else
@@ -62,7 +71,8 @@ struct MemAlloc {
     void* ptr;
     size_t size;
     size_t line;
-    char* file;
+    const char* func;
+    const char* file;
 };
 typedef struct MemAlloc MemAlloc;
 #define MEMDEBUG_START_NUM_ALLOCS 5000
@@ -91,19 +101,16 @@ extern void print_heap();
 /**************************/
 /* Not Externally visible */
 /**************************/
-static inline void mempanic(void* badptr, char* message, size_t line, char* file);
-static inline void OOM(size_t line, char* file, size_t num_bytes);
-
 static inline void
-mempanic(void* badptr, char* message, size_t line, char* file) {
-    printf("MEMORY PANIC: %s\nPointer: %p\nOn line: %zu\nIn file: %s\nAborted.\n", message, badptr, line, file);
+mempanic(void* badptr, const char* message, size_t line, const char* func, const char* file) {
+    printf("MEMORY PANIC: %s\nPointer: %p\nOn line: %zu\nIn function: %s\nIn file: %s\nAborted.\n", message, badptr, line, func, file);
     fflush(stdout);
     exit(MEMPANIC_EXIT_STATUS);
 }
 
 static inline void
-OOM(size_t line, char* file, size_t num_bytes) {
-    printf("Out of memory on line %zu in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, file, num_bytes);
+OOM(size_t line, const char* func, const char* file, size_t num_bytes) {
+    printf("Out of memory on line %zu of %s() in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, func, file, num_bytes);
     print_heap();
     exit(OOM_EXIT_STATUS);
 }
@@ -150,7 +157,7 @@ alloc_push(MemAlloc alloc) {
             newptr = (MemAlloc*)realloc(allocs, sizeof(MemAlloc) * new_allocs_cap);
             if (!newptr) {
                 printf("Failed to allocate more space to track allocations.\n");
-                OOM(__LINE__, __FILE__, sizeof(MemAlloc) * new_allocs_cap);
+                OOM(__LINE__, __func__, __FILE__, sizeof(MemAlloc) * new_allocs_cap);
             }
             allocs_cap = new_allocs_cap;
             allocs = newptr;
@@ -182,14 +189,14 @@ alloc_update(size_t index, MemAlloc new_info) {
 /*********************************************/
 
 extern void*
-memdebug_malloc(size_t n, size_t line, char* file) {
+memdebug_malloc(size_t n, size_t line, const char* func, const char* file) {
     // Call malloc()
     void* ptr = malloc(n);
-    if (!ptr) OOM(line, file, n);
+    if (!ptr) OOM(line, func, file, n);
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("malloc(%zu) -> %p in %s, line %zu.\n", n, ptr, file, line);
+    printf("malloc(%zu) -> %p on line %zu of %s() in %s.\n", n, ptr, line, func, file);
     fflush(stdout);
 #endif
 
@@ -198,6 +205,7 @@ memdebug_malloc(size_t n, size_t line, char* file) {
     newalloc.ptr = ptr;
     newalloc.size = n;
     newalloc.line = line;
+    newalloc.func = func;
     newalloc.file = file;
 
     MEMDEBUG_LOCK_MUTEX;
@@ -207,22 +215,22 @@ memdebug_malloc(size_t n, size_t line, char* file) {
 }
 
 extern void*
-memdebug_realloc(void* ptr, size_t n, size_t line, char* file) {
+memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const char* file) {
     MEMDEBUG_LOCK_MUTEX;
 
     // Check to make sure the allocation exists, and keep track of the location
     size_t alloc_index = alloc_find_index(ptr);
     if (ptr != NULL && alloc_index == MEM_FAIL_TO_FIND) {
-        mempanic(ptr, "Tried to realloc() an invalid pointer.", line, file);
+        mempanic(ptr, "Tried to realloc() an invalid pointer.", line, func, file);
     }
 
     // Call realloc()
     void* newptr = realloc(ptr, n);
-    if (!newptr) OOM(line, file, n);
+    if (!newptr) OOM(line, func, file, n);
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("realloc(%p, %zu) -> %p in %s, line %zu.\n", ptr, n, newptr, file, line);
+    printf("realloc(%p, %zu) -> %p on line %zu of %s() in %s.\n", ptr, n, newptr, line, func, file);
     fflush(stdout);
 #endif
 
@@ -231,6 +239,7 @@ memdebug_realloc(void* ptr, size_t n, size_t line, char* file) {
     newalloc.ptr = newptr;
     newalloc.size = n;
     newalloc.line = line;
+    newalloc.func = func;
     newalloc.file = file;
     alloc_update(alloc_index, newalloc);
 
@@ -240,13 +249,13 @@ memdebug_realloc(void* ptr, size_t n, size_t line, char* file) {
 }
 
 extern void
-memdebug_free(void* ptr, size_t line, char* file) {
+memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
     MEMDEBUG_LOCK_MUTEX;
 
     // Check to make sure the allocation exists, and keep track of the location
     size_t alloc_index = alloc_find_index(ptr);
     if (ptr != NULL && alloc_index == MEM_FAIL_TO_FIND) {
-        mempanic(ptr, "Tried to free() an invalid pointer.", line, file);
+        mempanic(ptr, "Tried to free() an invalid pointer.", line, func, file);
     }
 
     // Call free()
@@ -254,21 +263,21 @@ memdebug_free(void* ptr, size_t line, char* file) {
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("free(%p) in %s, line %zu.\n", ptr, file, line);
+    printf("free(%p) on line %zu of %s() in %s.\n", ptr, line, func, file);
     fflush(stdout);
 #endif
 
     // Remove from the list of allocations
     alloc_remove(alloc_index);
-    
+
     MEMDEBUG_UNLOCK_MUTEX;
 }
 
 // Wrap malloc(), realloc(), free() with the new functionality
 
-#define malloc(n) memdebug_malloc(n, __LINE__, __FILE__)
-#define realloc(ptr, n) memdebug_realloc(ptr, n, __LINE__, __FILE__)
-#define free(ptr) memdebug_free(ptr, __LINE__, __FILE__)
+#define malloc(n) memdebug_malloc(n, __LINE__, __func__, __FILE__)
+#define realloc(ptr, n) memdebug_realloc(ptr, n, __LINE__, __func__, __FILE__)
+#define free(ptr) memdebug_free(ptr, __LINE__, __func__, __FILE__)
 
 #else  // MEMDEBUG flag is disabled
 /*************************************************************************************/
