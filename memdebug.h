@@ -110,7 +110,7 @@ mempanic(void* badptr, const char* message, size_t line, const char* func, const
 
 static inline void
 OOM(size_t line, const char* func, const char* file, size_t num_bytes) {
-    printf("Out of memory on line %zu of %s() in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, func, file, num_bytes);
+    printf("Out of memory on line %zu in %s() in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, func, file, num_bytes);
     print_heap();
     exit(OOM_EXIT_STATUS);
 }
@@ -196,7 +196,7 @@ memdebug_malloc(size_t n, size_t line, const char* func, const char* file) {
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("malloc(%zu) -> %p on line %zu of %s() in %s.\n", n, ptr, line, func, file);
+    printf("malloc(%zu) -> %p on line %zu in %s() in %s.\n", n, ptr, line, func, file);
     fflush(stdout);
 #endif
 
@@ -230,7 +230,7 @@ memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const char*
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("realloc(%p, %zu) -> %p on line %zu of %s() in %s.\n", ptr, n, newptr, line, func, file);
+    printf("realloc(%p, %zu) -> %p on line %zu in %s() in %s.\n", ptr, n, newptr, line, func, file);
     fflush(stdout);
 #endif
 
@@ -263,7 +263,7 @@ memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
 
 #if PRINT_MEMALLOCS
     // Print message
-    printf("free(%p) on line %zu of %s() in %s.\n", ptr, line, func, file);
+    printf("free(%p) on line %zu in %s() in %s.\n", ptr, line, func, file);
     fflush(stdout);
 #endif
 
