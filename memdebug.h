@@ -60,13 +60,48 @@ int mutex_destroy(mutex_t* mutex) { return pthread_mutex_destroy(mutex); }
 
 #if MEMDEBUG
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-/****************************************/
-/* Global Allocation Tracking Variables */
-/****************************************/
+/******************************************/
+/* Void Pointer Hash Function For Hashmap */
+/******************************************/
 
+static inline size_t
+log_base_2(const size_t num) {
+    if (num == 1)
+        return 0;
+    return 1 + log_base_2(num / 2);
+}
+
+/* 
+ * Note that, by all accounts, this is a bad idea. 
+ * How ptr_hash behaves is entirely implementation specific because how uintptr_t is implementation specific. 
+ * However, it behaves in the sane way that you'd expect across most popular compilers.
+ */
+#define MAP_BUF_SIZE 1000
+extern size_t
+ptr_hash(void* val) {
+    size_t logsize = log_base_2(1 + sizeof(void*));
+    size_t shifted = (size_t)((uintptr_t)val) >> logsize;
+    size_t other = (size_t)((uintptr_t)val) << (8 - logsize);
+    size_t xed = shifted ^ other;
+    size_t ans = xed % MAP_BUF_SIZE;
+    return ans;
+}
+
+/**************************************/
+/* Global Allocation Tracking Hashmap */
+/**************************************/
+
+// Mutex to guard the allocation structure.
+mutex_t alloc_mutex = MUTEX_INITIALIZER;
+#define MEMDEBUG_LOCK_MUTEX mutex_lock(&alloc_mutex);
+#define MEMDEBUG_UNLOCK_MUTEX mutex_unlock(&alloc_mutex);
+
+struct MemAlloc;
+typedef struct MemAlloc MemAlloc;
 struct MemAlloc {
     void* ptr;
     size_t size;
@@ -74,17 +109,141 @@ struct MemAlloc {
     const char* func;
     const char* file;
 };
-typedef struct MemAlloc MemAlloc;
-#define MEMDEBUG_START_NUM_ALLOCS 5000
+
+struct MapMember;
+typedef struct MapMember MapMember;
+struct MapMember {
+    MemAlloc alloc;
+    MapMember* next;
+};
+
+// Global alloc hash map
+MapMember allocs[MAP_BUF_SIZE];
+bool memallocs_initialized = false;
 size_t num_allocs = 0;
-size_t allocs_cap = 0;
-MemAlloc* allocs;
 
-// Mutex to guard the above allocation structure.
-mutex_t alloc_mutex = MUTEX_INITIALIZER;
-#define MEMDEBUG_LOCK_MUTEX mutex_lock(&alloc_mutex);
-#define MEMDEBUG_UNLOCK_MUTEX mutex_unlock(&alloc_mutex);
+/***************/
+/* Map Methods */
+/***************/
+static inline void
+memallocs_init() {
+    for (size_t i = 0; i < MAP_BUF_SIZE; i++) {
+        allocs[i].alloc.ptr = NULL;
+        allocs[i].next = NULL;
+    }
+    memallocs_initialized = true;
+}
 
+static inline void
+alloc_add(MemAlloc alloc) {
+    if (!memallocs_initialized)
+        memallocs_init();
+
+    num_allocs++;
+
+    // If we can just insert into the map, do so.
+    MapMember* bucket = (MapMember*)allocs + ptr_hash(alloc.ptr);
+
+    // If we can insert into the main map array, do so
+    if (bucket->alloc.ptr == NULL) {
+        bucket->alloc = alloc;
+        return;
+    }
+
+    // Otherwise, traverse the linked list until you find the end
+    while (bucket->next != NULL) {
+        bucket = bucket->next;
+    }
+
+    // Create a new LL node off the previous for the allocation
+    bucket->next = (MapMember*)malloc(sizeof(MapMember));
+    bucket = bucket->next;
+
+    // Put the allocation into it.
+    bucket->alloc = alloc;
+    bucket->next = NULL;
+}
+
+// returns the pointer, or NULL if not found.
+static inline bool
+alloc_remove(void* ptr) {
+    if (!memallocs_initialized)
+        memallocs_init();
+
+    MapMember* previous = NULL;
+    MapMember* bucket = (MapMember*)allocs + ptr_hash(ptr);
+
+    // Traverse the bucket looking for the pointer
+    while (bucket) {
+        if (bucket->alloc.ptr == ptr) {
+            // Remove this bucket node from the linked list
+            if (!previous) {
+                // Copy from the next node into the original array.
+                // No frees required.
+                if (bucket->next) {
+                    bucket->alloc = bucket->next->alloc;
+                    bucket->next = bucket->next->next;
+                } else {
+                    bucket->alloc.ptr = NULL;
+                    bucket->next = NULL;
+                }
+            } else {
+                // Point the previous allocation at the next allocation.
+                // Then free the bucket.
+                previous->next = bucket->next;
+                free(bucket);
+            }
+            num_allocs--;
+            return true;
+        } else {
+            previous = bucket;
+            bucket = bucket->next;
+        }
+    }
+
+    return false;
+}
+
+/**********************/
+/* Externally visible */
+/**********************/
+extern void
+print_heap() {
+    size_t total_allocated = 0;
+
+    MEMDEBUG_LOCK_MUTEX;
+
+    if (!memallocs_initialized)
+        memallocs_init();
+
+    // For each bucket, traverse over each and print all the allocations
+    printf("\n*************\n* HEAP DUMP *\n*************\n");
+    for (size_t i = 0; i < MAP_BUF_SIZE; i++) {
+        MapMember* bucket = (MapMember*)(allocs + i);
+        while (bucket->alloc.ptr != NULL) {
+            MemAlloc alloc = bucket->alloc;
+            printf("Heap ptr: %p of size: %zu Allocated in file: %s On line: %zu\n",
+                   alloc.ptr, alloc.size, alloc.file, alloc.line);
+            total_allocated += alloc.size;
+
+            if (bucket->next) {
+                bucket = bucket->next;
+            } else {
+                break;
+            }
+        }
+    }
+
+    MEMDEBUG_UNLOCK_MUTEX;
+
+    printf("\nTotal Heap size in bytes: %zu, number of items: %zu\n\n\n", total_allocated, num_allocs);
+    fflush(stdout);
+}
+
+// At some point I may add callbacks to remedy this, but it shouldn't be too hard to just edit this file directly.
+/**************************/
+/* Not Externally visible */
+/**************************/
 #ifndef MEMPANIC_EXIT_STATUS
 #define MEMPANIC_EXIT_STATUS 10
 #endif
@@ -92,15 +251,6 @@ mutex_t alloc_mutex = MUTEX_INITIALIZER;
 #define OOM_EXIT_STATUS 11
 #endif
 
-/**********************/
-/* Externally visible */
-/**********************/
-extern void print_heap();
-
-// At some point I may add callbacks to remedy this, but it shouldn't be too hard to just edit this file directly.
-/**************************/
-/* Not Externally visible */
-/**************************/
 static inline void
 mempanic(void* badptr, const char* message, size_t line, const char* func, const char* file) {
     printf("MEMORY PANIC: %s\nPointer: %p\nOn line: %zu\nIn function: %s\nIn file: %s\nAborted.\n", message, badptr, line, func, file);
@@ -113,75 +263,6 @@ OOM(size_t line, const char* func, const char* file, size_t num_bytes) {
     printf("Out of memory on line %zu in %s() in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, func, file, num_bytes);
     print_heap();
     exit(OOM_EXIT_STATUS);
-}
-
-extern void
-print_heap() {
-    size_t total_allocated = 0;
-    size_t i;
-
-    printf("\n*************\n* HEAP DUMP *\n*************\n");
-    for (i = 0; i < num_allocs; i++) {
-        printf("Heap ptr: %p of size: %zu Allocated in file: %s On line: %zu\n",
-               allocs[i].ptr, allocs[i].size, allocs[i].file, allocs[i].line);
-        total_allocated += allocs[i].size;
-    }
-    printf("\nTotal Heap size: %zu, number of items: %zu\n\n\n", total_allocated, num_allocs);
-    fflush(stdout);
-}
-
-#define MEM_FAIL_TO_FIND 4294967295
-static inline size_t
-alloc_find_index(void* ptr) {
-    size_t i;
-    for (i = 0; i < num_allocs; i++) {
-        if (allocs[i].ptr == ptr) {
-            return i;
-        }
-    }
-    return MEM_FAIL_TO_FIND;
-}
-
-static inline void
-alloc_push(MemAlloc alloc) {
-    MemAlloc* newptr;
-
-    // Allocate more memory to store the information about the allocations if necessary
-    if (num_allocs >= allocs_cap) {
-        // If the list hasn't actually been initialized, initialize it. Otherwise, it needs to be grown.
-        if (allocs_cap == 0) {
-            allocs_cap = MEMDEBUG_START_NUM_ALLOCS;
-            allocs = (MemAlloc*)malloc(sizeof(MemAlloc) * allocs_cap);
-        } else {
-            size_t new_allocs_cap = allocs_cap * 1.4;
-            newptr = (MemAlloc*)realloc(allocs, sizeof(MemAlloc) * new_allocs_cap);
-            if (!newptr) {
-                printf("Failed to allocate more space to track allocations.\n");
-                OOM(__LINE__, __func__, __FILE__, sizeof(MemAlloc) * new_allocs_cap);
-            }
-            allocs_cap = new_allocs_cap;
-            allocs = newptr;
-        }
-    }
-
-    // Append the new allocation to the list
-    allocs[num_allocs] = alloc;
-    num_allocs++;
-}
-
-static inline void
-alloc_remove(size_t index) {
-    // Shift the elements one left to remove it from the list.
-    num_allocs--;
-    for (; index < num_allocs; index++) {
-        allocs[index] = allocs[index + 1];
-    }
-}
-
-static inline void
-alloc_update(size_t index, MemAlloc new_info) {
-    // Update the entry in the list
-    allocs[index] = new_info;
 }
 
 /*********************************************/
@@ -209,7 +290,7 @@ memdebug_malloc(size_t n, size_t line, const char* func, const char* file) {
     newalloc.file = file;
 
     MEMDEBUG_LOCK_MUTEX;
-    alloc_push(newalloc);
+    alloc_add(newalloc);
     MEMDEBUG_UNLOCK_MUTEX;
     return ptr;
 }
@@ -219,8 +300,8 @@ memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const char*
     MEMDEBUG_LOCK_MUTEX;
 
     // Check to make sure the allocation exists, and keep track of the location
-    size_t alloc_index = alloc_find_index(ptr);
-    if (ptr != NULL && alloc_index == MEM_FAIL_TO_FIND) {
+    bool removed = alloc_remove(ptr);
+    if (ptr != NULL && !removed) {
         mempanic(ptr, "Tried to realloc() an invalid pointer.", line, func, file);
     }
 
@@ -241,7 +322,7 @@ memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const char*
     newalloc.line = line;
     newalloc.func = func;
     newalloc.file = file;
-    alloc_update(alloc_index, newalloc);
+    alloc_add(newalloc);
 
     MEMDEBUG_UNLOCK_MUTEX;
 
@@ -253,10 +334,12 @@ memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
     MEMDEBUG_LOCK_MUTEX;
 
     // Check to make sure the allocation exists, and keep track of the location
-    size_t alloc_index = alloc_find_index(ptr);
-    if (ptr != NULL && alloc_index == MEM_FAIL_TO_FIND) {
+    bool removed = alloc_remove(ptr);
+    if (ptr != NULL && !removed) {
         mempanic(ptr, "Tried to free() an invalid pointer.", line, func, file);
     }
+
+    MEMDEBUG_UNLOCK_MUTEX;
 
     // Call free()
     free(ptr);
@@ -266,11 +349,6 @@ memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
     printf("free(%p) on line %zu in %s() in %s.\n", ptr, line, func, file);
     fflush(stdout);
 #endif
-
-    // Remove from the list of allocations
-    alloc_remove(alloc_index);
-
-    MEMDEBUG_UNLOCK_MUTEX;
 }
 
 // Wrap malloc(), realloc(), free() with the new functionality
