@@ -12,7 +12,7 @@ struct LL {
 int main() {
     size_t num_allocs = 100000;
 
-        LL *ll, *original;
+    LL *ll, *original;
     ll = original = malloc(sizeof(LL));
 
     for (size_t i = 0; i < num_allocs; i++) {
@@ -22,7 +22,7 @@ int main() {
 
     print_heap();
 
-    for (size_t i = 0; i < num_allocs + 1 - 30; i++) {
+    for (size_t i = 0; i < num_allocs + 1; i++) {
         ll = original;
         original = original->next;
         free(ll);

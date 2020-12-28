@@ -12,19 +12,19 @@
 
 #define mutex_t SRWLOCK
 #define MUTEX_INITIALIZER SRWLOCK_INIT
-int mutex_init(mutex_t* mutex) {
+static inline int mutex_init(mutex_t* mutex) {
     InitializeSRWLock(mutex);
     return 0;
 }
-int mutex_lock(mutex_t* mutex) {
+static inline int mutex_lock(mutex_t* mutex) {
     AcquireSRWLockExclusive(mutex);
     return 0;
 }
-int mutex_unlock(mutex_t* mutex) {
+static inline int mutex_unlock(mutex_t* mutex) {
     ReleaseSRWLockExclusive(mutex);
     return 0;
 }
-int mutex_destroy(mutex_t* mutex) { return 0; }
+static inline int mutex_destroy(mutex_t* mutex) { return 0; }
 
 #else
 // On other platforms use <pthread.h>
@@ -32,10 +32,10 @@ int mutex_destroy(mutex_t* mutex) { return 0; }
 
 #define mutex_t pthread_mutex_t
 #define MUTEX_INITIALIZER PTHREAD_MUTEX_INITIALIZER
-int mutex_init(mutex_t* mutex) { return pthread_mutex_init(mutex, NULL); }
-int mutex_lock(mutex_t* mutex) { return pthread_mutex_lock(mutex); }
-int mutex_unlock(mutex_t* mutex) { return pthread_mutex_unlock(mutex); }
-int mutex_destroy(mutex_t* mutex) { return pthread_mutex_destroy(mutex); }
+static inline int mutex_init(mutex_t* mutex) { return pthread_mutex_init(mutex, NULL); }
+static inline int mutex_lock(mutex_t* mutex) { return pthread_mutex_lock(mutex); }
+static inline int mutex_unlock(mutex_t* mutex) { return pthread_mutex_unlock(mutex); }
+static inline int mutex_destroy(mutex_t* mutex) { return pthread_mutex_destroy(mutex); }
 #endif
 
 #endif  // End mutex include guard
@@ -80,8 +80,8 @@ log_base_2(const size_t num) {
  * How ptr_hash behaves is entirely implementation specific because how uintptr_t is implementation specific. 
  * However, it behaves in the sane way that you'd expect across most popular compilers.
  */
-#define MAP_BUF_SIZE 1000
-extern size_t
+#define MAP_BUF_SIZE 100000
+static inline size_t
 ptr_hash(void* val) {
     size_t logsize = log_base_2(1 + sizeof(void*));
     size_t shifted = (size_t)((uintptr_t)val) >> logsize;
@@ -96,7 +96,7 @@ ptr_hash(void* val) {
 /**************************************/
 
 // Mutex to guard the allocation structure.
-mutex_t alloc_mutex = MUTEX_INITIALIZER;
+static mutex_t alloc_mutex = MUTEX_INITIALIZER;
 #define MEMDEBUG_LOCK_MUTEX mutex_lock(&alloc_mutex);
 #define MEMDEBUG_UNLOCK_MUTEX mutex_unlock(&alloc_mutex);
 
@@ -118,9 +118,9 @@ struct MapMember {
 };
 
 // Global alloc hash map
-MapMember allocs[MAP_BUF_SIZE];
-bool memallocs_initialized = false;
-size_t num_allocs = 0;
+static MapMember allocs[MAP_BUF_SIZE];
+static bool memallocs_initialized = false;
+static size_t num_allocs = 0;
 
 /***************/
 /* Map Methods */
@@ -179,10 +179,11 @@ alloc_remove(void* ptr) {
             // Remove this bucket node from the linked list
             if (!previous) {
                 // Copy from the next node into the original array.
-                // No frees required.
                 if (bucket->next) {
-                    bucket->alloc = bucket->next->alloc;
-                    bucket->next = bucket->next->next;
+                    MapMember* to_free = bucket->next;
+                    bucket->alloc = to_free->alloc;
+                    bucket->next = to_free->next;
+                    free(to_free);
                 } else {
                     bucket->alloc.ptr = NULL;
                     bucket->next = NULL;
@@ -362,6 +363,6 @@ memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
 /* Define externally visible functions to do nothing when debugging flag is disabled */
 /*************************************************************************************/
 
-void print_heap() {}
+extern void print_heap() {}
 #endif
 #endif  // Include guard
