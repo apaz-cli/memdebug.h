@@ -6,10 +6,9 @@
 
 // #define PRINT_MEMALLOCS 0
 
-
 // #define MEMDEBUG to zero to disable all wrapping and features.
 // No allocations will be tracked, and print_heap() and any additional debugging
-// features that are added will be defined to nothing and will be optimized out 
+// features that are added will be defined to nothing and will be optimized out
 // completely by the compiler.
 
 // #define MEMDEBUG 0
@@ -24,6 +23,7 @@ int main() {
     // Find memory leaks
     malloc(20);
     malloc(25);
+
     print_heap();
 
     // Catch out of memory errors

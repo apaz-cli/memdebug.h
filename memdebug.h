@@ -63,6 +63,10 @@ static inline int mutex_destroy(mutex_t* mutex) { return pthread_mutex_destroy(m
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+void low_mem_print_heap();
+void print_heap();
 
 /******************************************/
 /* Void Pointer Hash Function For Hashmap */
@@ -110,6 +114,37 @@ struct MemAlloc {
     const char* file;
 };
 
+static inline bool
+compare_memallocs(MemAlloc a1, MemAlloc a2) {
+    // First by file
+    int cmp = strcmp(a1.file, a2.file);
+    if (!cmp) {
+        // Then by line
+        return a1.line > a2.line;
+    } else {
+        if (cmp > 0)
+            return true;
+        else
+            return false;
+    }
+}
+
+static inline void
+sort_memallocs(MemAlloc* allocs, size_t n) {
+    // Sort the buffer. This is a shellsort.
+    size_t interval, i, j;
+    MemAlloc temp;
+    for (interval = n / 2; interval > 0; interval /= 2) {
+        for (i = interval; i < n; i += 1) {
+            temp = allocs[i];
+            for (j = i; j >= interval && compare_memallocs(allocs[j - interval], temp); j -= interval) {
+                allocs[j] = allocs[j - interval];
+            }
+            allocs[j] = temp;
+        }
+    }
+}
+
 struct MapMember;
 typedef struct MapMember MapMember;
 struct MapMember {
@@ -125,6 +160,8 @@ static size_t num_allocs = 0;
 /***************/
 /* Map Methods */
 /***************/
+static inline void OOM(size_t line, const char* func, const char* file, size_t num_bytes);
+
 static inline void
 memallocs_init() {
     for (size_t i = 0; i < MAP_BUF_SIZE; i++) {
@@ -157,6 +194,7 @@ alloc_add(MemAlloc alloc) {
 
     // Create a new LL node off the previous for the allocation
     bucket->next = (MapMember*)malloc(sizeof(MapMember));
+    if (!bucket->next) OOM(__LINE__ - 1, __func__, __FILE__, sizeof(MapMember));
     bucket = bucket->next;
 
     // Put the allocation into it.
@@ -205,11 +243,84 @@ alloc_remove(void* ptr) {
     return false;
 }
 
+/****************/
+/* Memory Panic */
+/****************/
+#ifndef MEMPANIC_EXIT_STATUS
+#define MEMPANIC_EXIT_STATUS 10
+#endif
+#ifndef OOM_EXIT_STATUS
+#define OOM_EXIT_STATUS 11
+#endif
+
+static inline void
+mempanic(void* badptr, const char* message, size_t line, const char* func, const char* file) {
+    printf("\nMEMORY PANIC: %s\nPointer: %p\nOn line: %zu\nIn function: %s\nIn file: %s\nAborted.\n", message, badptr, line, func, file);
+    fflush(stdout);
+    exit(MEMPANIC_EXIT_STATUS);
+}
+
+static inline void
+OOM(size_t line, const char* func, const char* file, size_t num_bytes) {
+    if (strcmp(file, "memdebug.h") == 0) {
+        printf(
+            "\nIronically, this program has run out of memory keeping track of or printing memory allocations."
+            "\nThe error did not happen inside your program.");
+    }
+    printf("\nOut of memory on line %zu in %s() in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, func, file, num_bytes);
+
+    low_mem_print_heap();
+    exit(OOM_EXIT_STATUS);
+}
+
 /**********************/
 /* Externally visible */
 /**********************/
-extern void
-print_heap() {
+
+// Print all of the memory allocations of this program.
+void print_heap() {
+    size_t total_allocated = 0;
+    size_t allocs_idx = 0;
+    MemAlloc* all_allocs = malloc(sizeof(MemAlloc) * num_allocs);
+    if (!all_allocs) OOM(__LINE__ - 1, __func__, __FILE__, sizeof(MemAlloc) * num_allocs);
+
+    MEMDEBUG_LOCK_MUTEX;
+    if (!memallocs_initialized)
+        memallocs_init();
+
+    // Pack the buffer
+    for (size_t i = 0; i < MAP_BUF_SIZE; i++) {
+        MapMember* bucket = (MapMember*)(allocs + i);
+        while (bucket->alloc.ptr != NULL) {
+            all_allocs[allocs_idx++] = bucket->alloc;
+            total_allocated += bucket->alloc.size;
+            if (bucket->next) {
+                bucket = bucket->next;
+            } else {
+                break;
+            }
+        }
+    }
+    MEMDEBUG_UNLOCK_MUTEX;
+
+    // Sort the buffer
+    sort_memallocs(all_allocs, allocs_idx);
+
+    // For now, just print the buffer.
+    printf("\n*************\n* HEAP DUMP *\n*************\n");
+    for (size_t i = 0; i < allocs_idx; i++) {
+        MemAlloc alloc = all_allocs[i];
+        printf("Heap ptr: %p of size: %zu Allocated in file: %s On line: %zu\n",
+               alloc.ptr, alloc.size, alloc.file, alloc.line);
+    }
+    printf("\nTotal Heap size in bytes: %zu, number of items: %zu\n\n\n", total_allocated, num_allocs);
+
+    free(all_allocs);
+}
+
+// This is the same as print_heap() except it doesn't sort
+// because it's meant to be called when the program is out of memory.
+void low_mem_print_heap() {
     size_t total_allocated = 0;
 
     MEMDEBUG_LOCK_MUTEX;
@@ -241,37 +352,11 @@ print_heap() {
     fflush(stdout);
 }
 
-// At some point I may add callbacks to remedy this, but it shouldn't be too hard to just edit this file directly.
-/**************************/
-/* Not Externally visible */
-/**************************/
-#ifndef MEMPANIC_EXIT_STATUS
-#define MEMPANIC_EXIT_STATUS 10
-#endif
-#ifndef OOM_EXIT_STATUS
-#define OOM_EXIT_STATUS 11
-#endif
-
-static inline void
-mempanic(void* badptr, const char* message, size_t line, const char* func, const char* file) {
-    printf("MEMORY PANIC: %s\nPointer: %p\nOn line: %zu\nIn function: %s\nIn file: %s\nAborted.\n", message, badptr, line, func, file);
-    fflush(stdout);
-    exit(MEMPANIC_EXIT_STATUS);
-}
-
-static inline void
-OOM(size_t line, const char* func, const char* file, size_t num_bytes) {
-    printf("Out of memory on line %zu in %s() in file: %s.\nCould not allocate %zu bytes.\nDumping heap:\n", line, func, file, num_bytes);
-    print_heap();
-    exit(OOM_EXIT_STATUS);
-}
-
 /*********************************************/
 /* malloc(), realloc(), free() Redefinitions */
 /*********************************************/
 
-extern void*
-memdebug_malloc(size_t n, size_t line, const char* func, const char* file) {
+void* memdebug_malloc(size_t n, size_t line, const char* func, const char* file) {
     // Call malloc()
     void* ptr = malloc(n);
     if (!ptr) OOM(line, func, file, n);
@@ -296,8 +381,7 @@ memdebug_malloc(size_t n, size_t line, const char* func, const char* file) {
     return ptr;
 }
 
-extern void*
-memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const char* file) {
+void* memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const char* file) {
     MEMDEBUG_LOCK_MUTEX;
 
     // Check to make sure the allocation exists, and keep track of the location
@@ -330,8 +414,7 @@ memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const char*
     return newptr;
 }
 
-extern void
-memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
+void memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
     MEMDEBUG_LOCK_MUTEX;
 
     // Check to make sure the allocation exists, and keep track of the location
@@ -363,6 +446,7 @@ memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
 /* Define externally visible functions to do nothing when debugging flag is disabled */
 /*************************************************************************************/
 
-extern void print_heap() {}
+void print_heap() {}
+void print_current_allocs() {}
 #endif
 #endif  // Include guard
