@@ -45,24 +45,27 @@ int main() {
 ```
 apaz@apaz-laptop:~/git/memdebug.h$ gcc test.c
 apaz@apaz-laptop:~/git/memdebug.h$ ./a.out
-malloc(1) -> 0x558aafcc1260 in test.c, line 20.
-realloc(0x558aafcc1260, 10) -> 0x558aafcc1260 in test.c, line 21.
-free(0x558aafcc1260) in test.c, line 22.
-malloc(20) -> 0x558aafcc1260 in test.c, line 25.
-malloc(25) -> 0x558aafcc1690 in test.c, line 26.
+malloc(1) -> 0x56120d0a7260 on line 19 of main() in test.c.
+realloc(0x56120d0a7260, 10) -> 0x56120d0a7260 on line 20 of main() in test.c.
+free(0x56120d0a7260) on line 21 of main() in test.c.
+malloc(20) -> 0x56120d0a7260 on line 24 of main() in test.c.
+malloc(25) -> 0x56120d0a7690 on line 25 of main() in test.c.
 
 *************
 * HEAP DUMP *
 *************
-Heap ptr: 0x558aafcc1260 of size: 20 Allocated in file: test.c On line: 25
-Heap ptr: 0x558aafcc1690 of size: 25 Allocated in file: test.c On line: 26
+1 pointer has been allocated totalling 20 bytes in file: test.c in function: main on line: 24.
+1 pointer has been allocated totalling 25 bytes in file: test.c in function: main on line: 25.
 
-Total Heap size: 45, number of items: 2
+Total Heap size in bytes: 45
+Total number of heap allocations: 2
+
 
 
 MEMORY PANIC: Tried to free() an invalid pointer.
 Pointer: 0x1
 On line: 34
+In function: main()
 In file: test.c
 Aborted.
 ```
