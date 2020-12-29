@@ -491,7 +491,7 @@ void* memdebug_malloc(size_t n, size_t line, const char* func, const char* file)
                    ANSI_COLOR_FUNC ")" ANSI_COLOR_RESET
                            " -> " ANSI_COLOR_PNTR "%p" ANSI_COLOR_RESET
                            " on line " ANSI_COLOR_LINE "%zu" ANSI_COLOR_RESET
-                           " in " ANSI_COLOR_FUNC "%s()" ANSI_COLOR_RESET
+                           " of " ANSI_COLOR_FUNC "%s()" ANSI_COLOR_RESET
                            " in " ANSI_COLOR_FILE "%s" ANSI_COLOR_RESET
                            ".\n",
            n, ptr, line, func, file);
@@ -535,7 +535,7 @@ void* memdebug_realloc(void* ptr, size_t n, size_t line, const char* func, const
                         ANSI_COLOR_FUNC ")" ANSI_COLOR_RESET
                         " -> " ANSI_COLOR_PNTR "%p" ANSI_COLOR_RESET
                         " on line " ANSI_COLOR_LINE "%zu" ANSI_COLOR_RESET
-                        " in " ANSI_COLOR_FUNC "%s()" ANSI_COLOR_RESET
+                        " of " ANSI_COLOR_FUNC "%s()" ANSI_COLOR_RESET
                         " in " ANSI_COLOR_FUNC "%s" ANSI_COLOR_RESET
                         ".\n",
         ptr, n, newptr, line, func, file);
@@ -577,7 +577,7 @@ void memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
             ANSI_COLOR_PNTR "%p" ANSI_COLOR_RESET
                 ANSI_COLOR_FUNC ")" ANSI_COLOR_RESET
                         " on line " ANSI_COLOR_LINE "%zu" ANSI_COLOR_RESET
-                        " in " ANSI_COLOR_FUNC "%s()" ANSI_COLOR_RESET
+                        " of " ANSI_COLOR_FUNC "%s()" ANSI_COLOR_RESET
                         " in " ANSI_COLOR_FILE "%s" ANSI_COLOR_RESET
                         ".\n",
         ptr, line, func, file);
