@@ -314,9 +314,10 @@ OOM(size_t line, const char* func, const char* file, size_t num_bytes) {
                "\nThe error did not happen inside your program, but it was likely caused by it because you allocated too much memory." ANSI_COLOR_RESET);
     }
     printf(
-        ANSI_COLOR_PNIC "\n*****************"
-                        "\n* Out of Memory *" 
-                        "\n*****************\n"ANSI_COLOR_RESET
+        ANSI_COLOR_PNIC
+        "\n*****************"
+        "\n* Out of Memory *"
+        "\n*****************\n" ANSI_COLOR_RESET
             ANSI_COLOR_FILE "In file: %s\n" ANSI_COLOR_RESET
                 ANSI_COLOR_FUNC "In function: %s()\n" ANSI_COLOR_RESET
                     ANSI_COLOR_LINE "On line: %zu\n" ANSI_COLOR_RESET
@@ -475,6 +476,10 @@ void low_mem_print_heap() {
     print_heap_summary_totals(total_allocated, num_allocs);
 }
 
+size_t get_num_allocs() {
+    return num_allocs;
+}
+
 /*********************************************/
 /* malloc(), realloc(), free() Redefinitions */
 /*********************************************/
@@ -595,8 +600,10 @@ void memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
 /*************************************************************************************/
 /* Define externally visible functions to do nothing when debugging flag is disabled */
 /*************************************************************************************/
+#include <stdlib.h>
 
 void print_heap() {}
-void print_current_allocs() {}
+void low_mem_print_heap() {}
+size_t get_num_allocs() { return NULL; }
 #endif
 #endif  // Include guard
