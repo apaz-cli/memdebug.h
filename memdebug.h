@@ -604,6 +604,6 @@ void memdebug_free(void* ptr, size_t line, const char* func, const char* file) {
 
 void print_heap() {}
 void low_mem_print_heap() {}
-size_t get_num_allocs() { return NULL; }
+size_t get_num_allocs() { return 0; }
 #endif
 #endif  // Include guard
