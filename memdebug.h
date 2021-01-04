@@ -45,11 +45,14 @@ static inline int mutex_destroy(mutex_t* mutex) { return pthread_mutex_destroy(m
 /* Pretty ANSI Terminal Colors */
 /*******************************/
 
-// #define ANSI_TERMINAL 0
+#ifndef ANSI_TERMINAL
+
 #ifdef _WIN32
 #define ANSI_TERMINAL 0
 #else
 #define ANSI_TERMINAL 1
+#endif
+
 #endif
 
 #if ANSI_TERMINAL
