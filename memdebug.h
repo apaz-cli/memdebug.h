@@ -163,10 +163,7 @@ compare_memallocs(MemAlloc a1, MemAlloc a2) {
         // Then by line
         return a1.line > a2.line;
     } else {
-        if (cmp > 0)
-            return true;
-        else
-            return false;
+        return (cmp > 0) ? true : false;
     }
 }
 
@@ -219,10 +216,10 @@ alloc_add(MemAlloc alloc) {
 
     num_allocs++;
 
-    // If we can just insert into the map, do so.
+    // Travel to the bucket to put this allocation into.
     MapMember* bucket = (MapMember*)allocs + ptr_hash(alloc.ptr);
 
-    // If we can insert into the main map array, do so
+    // If we can insert into the bucket directly, do so.
     if (bucket->alloc.ptr == NULL) {
         bucket->alloc = alloc;
         return;
@@ -379,7 +376,7 @@ print_heap_dump_header() {
 void print_heap() {
     size_t total_allocated = 0;
     size_t allocs_idx = 0;
-    MemAlloc* all_allocs = malloc(sizeof(MemAlloc) * num_allocs);
+    MemAlloc* all_allocs = (MemAlloc*)malloc(sizeof(MemAlloc) * num_allocs);
     if (!all_allocs) OOM(__LINE__ - 1, __func__, __FILE__, sizeof(MemAlloc) * num_allocs);
 
     MEMDEBUG_LOCK_MUTEX;
